@@ -1,0 +1,25 @@
+#pragma once
+
+////This file forward declares all the classes used in matrix manipulation
+////
+namespace cuStat{
+    template<typename Scalar>
+    class Matrix;
+
+    template<typename Scalar>
+    class View;
+
+    namespace internal{
+        template<typename Scalar, typename Derived>
+        class Base;
+
+        template<typename Scalar, typename LHS, typename RHS>
+        class AddOp;
+
+        template<typename Scalar>
+        class Assignable;
+
+        template<typename Scalar, typename DST, typename OP>
+        class UnaryOp;
+    }
+}

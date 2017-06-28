@@ -1,0 +1,145 @@
+#include <iostream>
+#include "src/util.h"
+#include "src/linalg.h"
+#include "src/exec.h"
+#include "src/stat/linear_lasso.h"
+#include "ostream"
+#include "src/util/matrix.h"
+using std::ostream;
+
+#include <cstdlib>
+#include <cuda_runtime.h>
+////This file is created to instantiate the templated functions and classes in cuStat namespace
+////majorly for the purpose of testing
+
+namespace cuStat {
+    ////No need to instantiate the workspace
+
+    ////Instantiate scalar
+    template
+    class Scalar<double>;
+
+    template
+    class Scalar<int>;
+
+    template
+    class Scalar<float>;
+
+    ////No need to instantiate matrix_kernels
+
+    ////Instantiate matrix
+    template
+    class Matrix<double>;
+
+    template
+    class Matrix<int>;
+
+    template
+    class Matrix<float>;
+
+    ////Instantiate ostream
+    template ostream &operator<<(ostream &, const Matrix<double> &);
+
+    template ostream &operator<<(ostream &, const Matrix<float> &);
+
+    template ostream &operator<<(ostream &, const Matrix<int> &);
+
+    ////Instantiate view class
+    template
+    class View<double>;
+
+    template
+    class View<float>;
+
+    template
+    class View<int>;
+
+    template
+    class View<size_t>;
+
+    ////Instantiate ostream
+    template ostream &operator<<(ostream &, const View<double> &);
+
+    template ostream &operator<<(ostream &, const View<float> &);
+
+    template ostream &operator<<(ostream &, const View<int> &);
+
+    ////Instantiate linSolver
+
+    template void
+    linSolver::matmul_nn<double, Matrix<double>, Matrix<double>, Matrix<double>>(double alpha, Matrix<double> &A,
+                                                                                 Matrix<double> &B, double beta,
+                                                                                 Matrix<double> &X);
+
+    template void
+    linSolver::matmul_nt<double, Matrix<double>, Matrix<double>, Matrix<double>>(double alpha, Matrix<double> &A,
+                                                                                 Matrix<double> &B, double beta,
+                                                                                 Matrix<double> &X);
+
+    template void
+    linSolver::matmul_tn<double, Matrix<double>, Matrix<double>, Matrix<double>>(double alpha, Matrix<double> &A,
+                                                                                 Matrix<double> &B, double beta,
+                                                                                 Matrix<double> &X);
+
+    template void
+    linSolver::matmul_tt<double, Matrix<double>, Matrix<double>, Matrix<double>>(double alpha, Matrix<double> &A,
+                                                                                 Matrix<double> &B, double beta,
+                                                                                 Matrix<double> &X);
+
+    template void
+    linSolver::matmul_nn<float, Matrix<float>, Matrix<float>, Matrix<float>>(float alpha, Matrix<float> &A,
+                                                                             Matrix<float> &B, float beta,
+                                                                             Matrix<float> &X);
+
+    template void
+    linSolver::matmul_nt<float, Matrix<float>, Matrix<float>, Matrix<float>>(float alpha, Matrix<float> &A,
+                                                                             Matrix<float> &B, float beta,
+                                                                             Matrix<float> &X);
+
+    template void
+    linSolver::matmul_tn<float, Matrix<float>, Matrix<float>, Matrix<float>>(float alpha, Matrix<float> &A,
+                                                                             Matrix<float> &B, float beta,
+                                                                             Matrix<float> &X);
+
+    template void
+    linSolver::matmul_tt<float, Matrix<float>, Matrix<float>, Matrix<float>>(float alpha, Matrix<float> &A,
+                                                                             Matrix<float> &B, float beta,
+                                                                             Matrix<float> &X);
+
+    template void linSolver::thin_svd<Matrix<double>, Matrix<double>, Matrix<double>, Matrix<double>>(Matrix<double> &A,
+                                                                                                      Matrix<double> &U,
+                                                                                                      Matrix<double> &VT,
+                                                                                                      Matrix<double> &S);
+
+    template void linSolver::thin_svd<Matrix<float>, Matrix<float>, Matrix<float>, Matrix<float>>(Matrix<float> &A,
+                                                                                                  Matrix<float> &U,
+                                                                                                  Matrix<float> &VT,
+                                                                                                  Matrix<float> &S);
+
+    template void
+    cuStat::linSolver::matmul_nn<double, cuStat::View<double>, cuStat::Matrix<double>, cuStat::Matrix<double> >(double,
+                                                                                                                cuStat::View<double> &,
+                                                                                                                cuStat::Matrix<double> &,
+                                                                                                                double,
+                                                                                                                cuStat::Matrix<double> &);
+
+    template void
+    cuStat::linSolver::matmul_nt<double, cuStat::View<double>, cuStat::Matrix<double>, cuStat::Matrix<double> >(double,
+                                                                                                                cuStat::View<double> &,
+                                                                                                                cuStat::Matrix<double> &,
+                                                                                                                double,
+                                                                                                                cuStat::Matrix<double> &);
+
+    template void copy_to_cpu<double>(double *, const Matrix<double> &, cudaStream_t stream);
+
+    template void copy_to_gpu<double>(const double *from, Matrix<double> &dst, cudaStream_t stream);
+
+    template void copy_to_cpu<int>(int *, const Matrix<int> &, cudaStream_t stream);
+
+    template void copy_to_gpu(const int *from, Matrix<int> &dst, cudaStream_t stream);
+
+    template void copy_to_cpu<float>(float *, const Matrix<float> &, cudaStream_t stream);
+
+    template void copy_to_gpu(const float *from, Matrix<float> &dst, cudaStream_t stream);
+
+}

@@ -1,0 +1,208 @@
+import numpy as np
+cimport numpy as np
+cimport cython
+import cython
+from recordtype import recordtype
+
+NSPCASolution = recordtype('NSPCA_Solution', ['transformed_score', 'principal_score', 'component_loading'])
+
+@cython.boundscheck(False)
+def is_similar(a, b, thres = 0.1):
+    if a.ndim != b.ndim:
+        print "Warning: Shape is not the same"
+        return False
+    for i in range(a.ndim):
+        if a.shape[i] != b.shape[i]:
+            print "Warning: Shape is not the same"
+            return False
+    for i in range(a.shape[0]):
+        for j in range(a.shape[1]):
+            if abs(a[i, j] - b[i, j]) > thres:
+                return False
+    return True
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def init_svd_impl(np.ndarray[int, mode = 'fortran', ndim=2] data,
+                  np.ndarray[int, mode = 'fortran', ndim =2] restriction,
+                  double scale):
+    cdef int no_obs = data.shape[0]
+    cdef int no_var = data.shape[1]
+    cdef int reduce_dim = restriction.shape[0]
+    transformed_score = np.asfortranarray(np.zeros((no_obs, no_var), dtype=np.float64))
+    principal_score = np.asfortranarray(np.zeros((no_obs, reduce_dim), dtype=np.float64))
+    component_loading = np.asfortranarray(np.zeros((reduce_dim, no_var), dtype=np.float64))
+    transformed_score = normalize_transformed_score(data, scale)
+    # cdef np.ndarray[double, mode='fortran',ndim=2] data_tmp = data.copy()
+
+    [u, diag, v] = np.linalg.svd(data, full_matrices=False)
+    cdef int column_number = reduce_dim
+    principal_score = np.asfortranarray(u[:, 0:(reduce_dim)])
+    # print principal_score
+    component_loading = np.asfortranarray(np.diag(diag)[0:column_number, 0:column_number].dot(v[0:column_number, :]))
+    # print component_loading
+    check_signs(component_loading, restriction)
+    return NSPCASolution(transformed_score=transformed_score, principal_score=principal_score,
+                         component_loading=component_loading)
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def normalize_transformed_score(np.ndarray[int, mode = 'fortran', ndim=2] data,
+                                double scale):
+    cdef np.ndarray[double, mode ='fortran', ndim=2] init_transformed_score = np.asfortranarray(
+        np.copy(data.astype(np.float64)))
+    for i in range(data.shape[1]):
+        init_transformed_score[:, i] = (init_transformed_score[:, i] - np.mean(init_transformed_score[:, i])) * (
+            scale / np.sqrt(np.var(init_transformed_score[:, i])))
+
+    return init_transformed_score
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def check_signs(np.ndarray[double, mode = 'fortran', ndim=2] init_component_loading,
+                np.ndarray[int, mode = 'fortran', ndim=2] restriction):
+    cdef int nrow = restriction.shape[0]
+    cdef int ncol = restriction.shape[1]
+
+    for row in range(nrow):
+        for col in range(ncol):
+            if restriction[row, col] == -1 and init_component_loading[row, col] > 0:
+                init_component_loading[row, col] = - init_component_loading[row, col]
+            elif restriction[row, col] == 1 and init_component_loading[row, col] < 0:
+                init_component_loading[row, col] = -init_component_loading[row, col]
+            elif restriction[row, col] == 0 and init_component_loading[row, col] != 0:
+                init_component_loading[row, col] = 0
+
+cdef extern from "../cxxsrc/Solver.h" namespace "NSPCA":
+    cdef cppclass Solver:
+        Solver(int no_obs, size_t no_var, size_t reduced_dim, double scale, unsigned int numThreads,
+               int numStreams) except+
+        void init(const int *data, const int *restriction, double *transformed_score, double *principal_socre,
+                  double *component_loading) except+
+        void transformed_score(unsigned int numThreadsGPU, unsigned int numThreadsGPUZ) except+
+        void principal_score() except+
+        void component_loading(int numThreadsGPU, int numBlocksGPU) except+
+        void cumulate_gpu(unsigned int numThreadsGPU) except+
+        void get_transformed_score(double *dst) except+
+        void get_principal_score(double *dst) except+
+        void get_component_loading(double *dst) except+
+        void set_alpha(const double new_alpha)
+        void get_cumu_score(double *dst) except+
+        void get_incidence_count(int *dst) except+
+        void solve(double *transformed_score, double *principal_score, double *component_loading, double alpha,
+                   double threshold,
+                   int max_iter, unsigned int ts_thread1, unsigned int ts_thread2, unsigned int cl_thread,
+                   unsigned int cl_block) except+
+
+cdef class nspca_solver_impl:
+    cdef Solver*solver
+    cdef size_t no_obs
+    cdef size_t no_var
+    cdef size_t reduced_dim
+    cdef bool initialized
+    def __init__(self, int no_obs, size_t no_var, size_t reduced_dim, double scale, unsigned int numThreads,
+                 int numStreams):
+        assert no_obs > 1
+        assert no_var > 1
+        assert reduced_dim > 1
+        assert reduced_dim < no_var
+        assert scale > 0
+        assert numThreads > 0
+        assert numStreams > 0
+        try:
+            self.solver = new Solver(no_obs, no_var, reduced_dim, scale, numThreads, numStreams)
+            self.no_obs = no_obs
+            self.no_var = no_var
+            self.reduced_dim = reduced_dim
+            self.initialized = False
+
+        except:
+            raise Exception(
+                "Initialization Failed. Please check you have installed appropriate software support and restart python interpreter")
+
+    def __del__(self):
+        del self.solver
+        # void transformed_score(unsigned int numThreadsGPU) except+
+        # void principal_score() except+
+        # void component_score(int numThreadsGPU, int numBlocksGPU) except+
+    def solve(self, int alpha, unsigned int ts_s1, unsigned int ts_s2, unsigned int cl_s, unsigned int cl_b):
+        if not self.initialized:
+            print "Error: Must initialize the routine first"
+            return None
+        else:
+            cdef np.ndarray[double, ndim=2, mode='fortran'] transformed_score = np.zeros((self.no_obs, self.no_var),
+                                                                                         dtype=np.float64, order='F')
+            cdef np.ndarray[double, ndim=2, mode='fortran'] principal_score = np.zeros((self.no_obs, self.reduced_dim),
+                                                                                       dtype=np.float64, order='F')
+            cdef np.ndarray[double, ndim=2, mode='fortran'] component_loading = np.zeros(
+                (self.reduced_dim, self.no_var),
+                dtype=np.float64, order='F')
+            self.solver.solve(&transformed_score[0, 0], &principal_score[0, 0], &component_loading[0, 0], alpha, ts_s1,
+                              ts_s2, cl_s, cl_b)
+            return NSPCASolution(principal_score=principal_score, transformed_score=transformed_score,
+                                 component_loading=component_loading)
+
+    def transformed_score(self, unsigned int numThreadsGPU, unsigned int numThreadsGPUZ):
+        assert numThreadsGPU > 0
+        self.solver.transformed_score(numThreadsGPU, numThreadsGPUZ)
+
+    def principal_score(self):
+        self.solver.principal_score()
+
+    def component_loading(self, numThreadsGPU, numBlocksGPU):
+        assert numThreadsGPU > 0
+        assert numBlocksGPU > 0
+        self.solver.component_loading(numThreadsGPU, numBlocksGPU)
+
+    def get_transformed_score(self):
+        cdef np.ndarray[double, mode='fortran', ndim=2] result = np.zeros((self.no_obs, self.no_var), dtype=np.float64,
+                                                                          order='F')
+        self.solver.get_transformed_score(&result[0, 0])
+        return result
+
+    def get_principal_score(self):
+        cdef np.ndarray[double, mode='fortran', ndim=2] result = np.zeros((self.no_obs, self.reduced_dim),
+                                                                          dtype=np.float64, order='F')
+        self.solver.get_principal_score(&result[0, 0])
+        return result
+
+    def get_component_loading(self):
+        cdef np.ndarray[double, mode='fortran', ndim=2] result = np.zeros((self.reduced_dim, self.no_var),
+                                                                          dtype=np.float64, order='F')
+        self.solver.get_component_loading(&result[0, 0])
+        return result
+
+    def set_alpha(self, const double new_alpha):
+        assert new_alpha > 0
+        self.solver.set_alpha(new_alpha)
+
+    def get_cumu_score(self):
+        cdef np.ndarray[double, mode ='fortran', ndim=2] dst = np.zeros((3, self.no_var), dtype=np.float64, order='F')
+        self.solver.get_cumu_score(&dst[0, 0])
+        # print dst
+        return dst
+
+    def get_incidence_count(self):
+        cdef np.ndarray[int, mode='fortran', ndim=2] dst = np.zeros((3, self.no_var), dtype=np.int32, order='F')
+        self.solver.get_incidence_count(&dst[0, 0])
+        return dst
+
+    @staticmethod
+    def init_svd(np.ndarray[int, mode = 'fortran', ndim=2] data,
+                 np.ndarray[int, mode = 'fortran', ndim =2] restriction,
+                 np.ndarray[double, mode = 'fortran', ndim=2] transformed_score,
+                 np.ndarray[double, mode ='fortran', ndim=2] principal_score,
+                 np.ndarray[double, mode = 'fortran', ndim=2] component_loading,
+                 double scale):
+        init_svd_impl(data, restriction, transformed_score, principal_score, component_loading)
+
+    def init(self, np.ndarray[int, mode = 'fortran', ndim=2] data,
+             np.ndarray[int, mode='fortran', ndim=2] restriction,
+             np.ndarray[double, mode='fortran', ndim=2] transformed_score,
+             np.ndarray[double, mode='fortran', ndim=2] principal_score,
+             np.ndarray[double, mode='fortran', ndim=2] component_loading):
+        self.initialized = True
+        self.solver.init(&data[0, 0], &restriction[0, 0], &transformed_score[0, 0], &principal_score[0, 0],
+                         &component_loading[0, 0])
+# void init(const int *data, const int *restriction, double *transformed_score, double *principal_socre,
+#                   double *component_loading) except+
